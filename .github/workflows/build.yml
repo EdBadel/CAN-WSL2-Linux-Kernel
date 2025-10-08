@@ -1,0 +1,49 @@
+name: Build WSL2 kernel with CAN support
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 12 1 * *"    # once a month, on the 1st at 12:00 UTC
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout WSL2 kernel
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/WSL2-Linux-Kernel
+          ref: linux-msft-wsl-6.6.y  # or track main
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential flex bison libssl-dev libelf-dev libncurses-dev bc dwarves
+
+      - name: Import default WSL config
+        run: |
+          cp Microsoft/config-wsl .config
+
+      - name: Enable CAN modules
+        run: |
+          scripts/config --module CONFIG_CAN
+          scripts/config --module CONFIG_CAN_RAW
+          scripts/config --module CONFIG_CAN_VCAN
+          scripts/config --module CONFIG_CAN_GW
+          scripts/config --module CONFIG_CAN_DEV
+          scripts/config --module CONFIG_CAN_BCM
+          scripts/config --module CONFIG_CAN_J1939
+          scripts/config --module CONFIG_CAN_ISOTP
+
+      - name: Build kernel and modules
+        run: |
+          make -j$(nproc)
+          mkdir -p output
+          cp arch/x86/boot/bzImage output/
+          tar czf output/modules.tar.gz /lib/modules || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wsl2-kernel-can
+          path: output/
