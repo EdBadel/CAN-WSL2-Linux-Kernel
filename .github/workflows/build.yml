@@ -1,4 +1,4 @@
-name: Build WSL2 kernel with CAN support
+name: Build & Release WSL2 Kernel with CAN Support
 
 on:
   workflow_dispatch:
@@ -8,24 +8,59 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout WSL2 kernel
-        uses: actions/checkout@v4
+      # ---------------------------------------
+      # 1️⃣  Cache apt downloads for faster installs
+      # ---------------------------------------
+      - name: Cache APT packages
+        uses: actions/cache@v4
         with:
-          repository: microsoft/WSL2-Linux-Kernel
-          ref: linux-msft-wsl-6.6.y  # or track main
+          path: |
+            /var/cache/apt
+            /var/lib/apt/lists
+          key: ${{ runner.os }}-apt-${{ hashFiles('.github/workflows/build-wsl2-can.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-apt-
 
       - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y build-essential flex bison libssl-dev libelf-dev libncurses-dev bc dwarves
+          sudo apt install -y build-essential flex bison libssl-dev libelf-dev libncurses-dev \
+              bc dwarves cpio qemu-utils ccache
 
-      - name: Import default WSL config
+      # ---------------------------------------
+      # 2️⃣  Cache compiler outputs (ccache)
+      # ---------------------------------------
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ${{ runner.os }}-ccache-${{ github.ref }}
+          restore-keys: |
+            ${{ runner.os }}-ccache-
+
+      - name: Configure ccache
         run: |
-          cp Microsoft/config-wsl .config
+          echo "export CC='ccache gcc'" >> $GITHUB_ENV
+          echo "export CXX='ccache g++'" >> $GITHUB_ENV
 
+      # ---------------------------------------
+      # 3️⃣  Checkout Microsoft WSL2 Kernel
+      # ---------------------------------------
+      - name: Checkout WSL2 kernel
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/WSL2-Linux-Kernel
+          ref: linux-msft-wsl-6.6.y
+          fetch-depth: 1
+
+      # ---------------------------------------
+      # 4️⃣  Configure CAN support + version tag
+      # ---------------------------------------
       - name: Enable CAN modules
         run: |
+          cp Microsoft/config-wsl .config
           scripts/config --module CONFIG_CAN
           scripts/config --module CONFIG_CAN_RAW
           scripts/config --module CONFIG_CAN_VCAN
@@ -34,16 +69,72 @@ jobs:
           scripts/config --module CONFIG_CAN_BCM
           scripts/config --module CONFIG_CAN_J1939
           scripts/config --module CONFIG_CAN_ISOTP
+          # Force clean version string
+          scripts/config --set-str CONFIG_LOCALVERSION "-WSL2-can"
+          scripts/config --disable CONFIG_LOCALVERSION_AUTO
+          make olddefconfig
 
+      # ---------------------------------------
+      # 5️⃣  Cache kernel build output
+      # ---------------------------------------
+      - name: Cache kernel build tree
+        uses: actions/cache@v4
+        with:
+          path: |
+            ./arch/x86
+            ./include
+            ./kernel
+            ./drivers
+            ./net
+            ./lib
+          key: ${{ runner.os }}-kernel-${{ github.ref }}
+          restore-keys: |
+            ${{ runner.os }}-kernel-
+
+      # ---------------------------------------
+      # 6️⃣  Build kernel + modules
+      # ---------------------------------------
       - name: Build kernel and modules
         run: |
           make -j$(nproc)
+          make INSTALL_MOD_PATH="$PWD/modules" modules_install
           mkdir -p output
           cp arch/x86/boot/bzImage output/
-          tar czf output/modules.tar.gz /lib/modules || true
+          tar czf output/modules.tar.gz -C modules .
 
-      - name: Upload artifacts
+      # ---------------------------------------
+      # 7️⃣  Determine kernel version
+      # ---------------------------------------
+      - name: Get kernel version
+        id: version
+        run: echo "ver=$(make kernelrelease)" >> $GITHUB_OUTPUT
+
+      # ---------------------------------------
+      # 8️⃣  Upload build artifact
+      # ---------------------------------------
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: wsl2-kernel-can
+          name: wsl2-kernel-${{ steps.version.outputs.ver }}
           path: output/
+
+      # ---------------------------------------
+      # 9️⃣  Create or update GitHub Release
+      # ---------------------------------------
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.ver }}
+          name: "WSL2 Kernel ${{ steps.version.outputs.ver }}"
+          body: |
+            Automatically built kernel with CAN bus support for WSL2.
+            Includes:
+            - CONFIG_CAN, CONFIG_CAN_RAW, CONFIG_CAN_VCAN, CONFIG_CAN_GW
+            - CONFIG_CAN_DEV, CONFIG_CAN_BCM, CONFIG_CAN_J1939, CONFIG_CAN_ISOTP
+
+            Build date: ${{ github.run_started_at }}
+          files: |
+            output/bzImage
+            output/modules.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
