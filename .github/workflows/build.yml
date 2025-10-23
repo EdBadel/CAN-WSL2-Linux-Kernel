@@ -69,6 +69,13 @@ jobs:
           scripts/config --module CONFIG_CAN_BCM
           scripts/config --module CONFIG_CAN_J1939
           scripts/config --module CONFIG_CAN_ISOTP
+          scripts/config --module CONFIG_USB
+          scripts/config --module CONFIG_USB
+          scripts/config --module CONFIG_CAN_USB
+          scripts/config --module CONFIG_CAN_PEAK_USB     # For PCAN-USB
+          scripts/config --module CONFIG_CAN_SLUSB        # Some generic adapters
+          scripts/config --module CONFIG_CAN_KVASER_USB   # For Kvaser
+          scripts/config --module CONFIG_CAN_GS_USB
           # Force clean version string
           scripts/config --set-str CONFIG_LOCALVERSION "-WSL2-can"
           scripts/config --disable CONFIG_LOCALVERSION_AUTO
