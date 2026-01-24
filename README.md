@@ -1,5 +1,5 @@
 # WSL Kernel for CAN development
-This repo is forked from [WSL2-Linux-Kernel][wsl2-kernel], and includes an action that compiles the
+This repo is forked from [WSL2-Linux-Kernel](https://github.com/microsoft/WSL2-Linux-Kernel), and includes an action that compiles the
 kernel with many drivers necessary for the development of can-itnerfacing software on WSL.
 
 # Download & Install
